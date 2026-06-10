@@ -1,90 +1,3 @@
-# AUTO_TKINTER_FIX - PyInstaller tkinter 路径修复（打包工具自动注入）
-import sys, os
-if getattr(sys, 'frozen', False):
-    _tk_base = sys._MEIPASS
-    for _env_var, _subdir in [('TCL_LIBRARY', 'tcl'), ('TK_LIBRARY', 'tk')]:
-        _path = os.path.join(_tk_base, _subdir)
-        if os.path.exists(_path):
-            os.environ[_env_var] = _path
-    _dlls = os.path.join(_tk_base, 'DLLs')
-    if os.path.exists(_dlls):
-        os.environ['PATH'] = _dlls + os.pathsep + os.environ.get('PATH', '')
-# END_AUTO_TKINTER
-
-# AUTO_INJECTED_WORKDIR - 设置为exe所在目录
-import os
-import sys
-import ctypes
-import tempfile
-
-class ExePathManager:
-    @staticmethod
-    def is_frozen() -> bool:
-        frozen_flags = [
-            getattr(sys, 'frozen', False),
-            hasattr(sys, '_MEI_ARCHIVE'),
-            getattr(sys, 'nuitka_is_frozen', False),
-        ]
-        if not any(frozen_flags):
-            if sys.argv[0].lower().endswith('.exe'):
-                return True
-            if 'temp' in sys.executable.lower() or 'onefile' in sys.executable.lower():
-                return True
-            if sys.platform == 'win32':
-                try:
-                    buffer = ctypes.create_unicode_buffer(ctypes.wintypes.MAX_PATH)
-                    ctypes.windll.kernel32.GetModuleFileNameW(
-                        ctypes.wintypes.HMODULE(0),
-                        buffer,
-                        ctypes.wintypes.MAX_PATH
-                    )
-                    exe_path = buffer.value
-                    if exe_path.lower().endswith('.exe'):
-                        return True
-                except:
-                    pass
-        return any(frozen_flags)
-
-    @staticmethod
-    def get_real_exe_path() -> str:
-        if not ExePathManager.is_frozen():
-            return os.path.abspath(__file__)
-        if sys.platform == 'win32':
-            try:
-                buffer = ctypes.create_unicode_buffer(ctypes.wintypes.MAX_PATH)
-                ctypes.windll.kernel32.GetModuleFileNameW(
-                    ctypes.wintypes.HMODULE(0),
-                    buffer,
-                    ctypes.wintypes.MAX_PATH
-                )
-                real_path = buffer.value
-                if os.path.exists(real_path) and os.path.isfile(real_path):
-                    return real_path
-            except:
-                pass
-        if hasattr(sys, '_MEIPASS'):
-            return sys.executable
-        return os.path.abspath(sys.argv[0])
-
-    @staticmethod
-    def get_exe_directory() -> str:
-        return os.path.dirname(ExePathManager.get_real_exe_path())
-
-    @staticmethod
-    def is_temp_directory(path: str) -> bool:
-        temp_dirs = [
-            tempfile.gettempdir(),
-            os.path.join(os.environ.get('TEMP', ''), ''),
-            os.path.join(os.environ.get('TMP', ''), ''),
-        ]
-        abs_path = os.path.abspath(path)
-        return any(abs_path.startswith(temp_dir) for temp_dir in temp_dirs if temp_dir)
-
-if ExePathManager.is_frozen():
-    exe_dir = ExePathManager.get_exe_directory()
-    if os.path.exists(exe_dir):
-        os.chdir(exe_dir)
-# END AUTO_INJECTED_WORKDIR
 import tkinter as tk
 from tkinter import filedialog, scrolledtext, ttk, messagebox
 import threading
@@ -105,12 +18,31 @@ from io import BytesIO
 class PyInstxtractorCN_GUI:
     def __init__(self, root):
         self.root = root
-        
+        # 在初始化时检查单实例
+        if not self._check_single_instance():
+            # 已有实例运行，退出当前
+            root.destroy()
+            sys.exit(0)
+        # 检测运行环境
+        self.is_frozen = getattr(sys, 'frozen', False)
+    
+        if self.is_frozen:
+            # 打包模式：查找系统Python
+            self.python_exe = self._find_system_python()
+            if self.python_exe:
+                self._log(f"✓ 找到系统Python: {self.python_exe}", "success")
+            else:
+                self._log("⚠ 未找到系统Python，部分功能可能不可用", "warning")
+                self.python_exe = None
+        else:
+            # 源码模式：使用当前Python
+            self.python_exe = sys.executable
+            self._log(f"✓ 源码模式，使用Python: {self.python_exe}", "success")
         # 获取屏幕尺寸，设置为屏幕的70%
         screen_width = self.root.winfo_screenwidth()
         screen_height = self.root.winfo_screenheight()
-        window_width = int(screen_width * 0.7)
-        window_height = int(screen_height * 0.75)
+        window_width = int(screen_width * 0.8)
+        window_height = int(screen_height * 0.8)
         x = (screen_width - window_width) // 2
         y = (screen_height - window_height) // 2
         
@@ -138,12 +70,12 @@ class PyInstxtractorCN_GUI:
         self.current_preview_file = None
         
         # 左侧面板宽度
-        self.left_panel_width = int(window_width * 0.25)
+        self.left_panel_width = int(window_width * 0.30)
         self.is_resizing = False
         
         # 默认更新配置
         self.default_update_url = "https://raw.githubusercontent.com/rajveerexe/PycDecompiler/main/PycDecompiler.py"
-        self.custom_update_url = ""
+        self.custom_update_url = "https://github.com/Ghostplugger/PycDecompiler/tree/main/PycDecompiler.py"
         self.update_config = {
             "github_repo": "rajveerexe/PycDecompiler",
             "file_name": "PycDecompiler.py",
@@ -178,7 +110,7 @@ class PyInstxtractorCN_GUI:
             "pycdc": {
                 "name": "pycdc", 
                 "cmd": "pycdc", 
-                "description": "C++编写，速度快，但混淆代码可能失败",
+                "description": "pip install pycdc ,C++编写，速度快，但混淆代码可能失败",
                 "check_method": "exe",
                 "type": "local",
                 "quality": "⭐⭐⭐"
@@ -213,7 +145,7 @@ class PyInstxtractorCN_GUI:
             "pydumpck": {
                 "name": "PyDumpck", 
                 "cmd": "pydumpck",
-                "description": "【反混淆】多线程解包工具，支持加密exe/pyc",
+                "description": "【反混淆】多线程解包工具，支持加密exe/pyc\n安装: pip install pydumpck",
                 "check_method": "pip",
                 "module": "pydumpck",
                 "type": "deobfuscator",
@@ -231,7 +163,7 @@ class PyInstxtractorCN_GUI:
             "uncompyle6": {
                 "name": "uncompyle6", 
                 "cmd": "uncompyle6", 
-                "description": "Python编写，混淆代码基本无法处理",
+                "description": "Python编写，混淆代码基本无法处理\n安装: pip install uncompyle6",
                 "check_method": "both",
                 "module": "uncompyle6",
                 "type": "local",
@@ -240,7 +172,7 @@ class PyInstxtractorCN_GUI:
             "decompyle3": {
                 "name": "decompyle3", 
                 "cmd": "decompyle3", 
-                "description": "针对Python 3，混淆代码效果差",
+                "description": "针对Python 3，混淆代码效果差\n安装: pip install decompyle3",
                 "check_method": "both",
                 "module": "decompyle3",
                 "type": "local",
@@ -250,7 +182,7 @@ class PyInstxtractorCN_GUI:
         
         # 初始化状态变量
         self.status_var = tk.StringVar(value="就绪")
-        self.auto_retry_var = tk.BooleanVar(value=True)  # 默认开启自动轮询
+        self.auto_retry_var = tk.BooleanVar(value=True)  # 默认开启自动轮换
         self._create_widgets()
         
         # 设置拖拽功能
@@ -269,24 +201,44 @@ class PyInstxtractorCN_GUI:
     def __del__(self):
         if hasattr(self, 'original_stdout'):
             sys.stdout = self.original_stdout
-    
+
+    def _get_resource_path(self, relative_path):
+        """获取资源文件的正确路径（支持打包exe）"""
+        try:
+            # PyInstaller 创建临时文件夹，将路径存储在 _MEIPASS 中
+            base_path = sys._MEIPASS
+        except Exception:
+            base_path = os.path.abspath(".")
+
+        return os.path.join(base_path, relative_path)
+
     def _set_window_icon(self):
         """设置窗口图标"""
         try:
-            # 尝试加载外部的icon.ico文件
-            icon_paths = [
+            # 获取正确的图标路径
+            icon_path = self._get_resource_path("icon.ico")
+
+            if os.path.exists(icon_path):
+                self.root.iconbitmap(icon_path)
+                self._log(f"✓ 已加载图标: {icon_path}", "success")
+                return True
+            else:
+                self._log(f"图标文件不存在: {icon_path}", "warning")
+
+            # 备用：尝试其他路径
+            alt_paths = [
                 os.path.join(os.path.dirname(sys.argv[0]), "icon.ico"),
                 os.path.join(os.getcwd(), "icon.ico"),
-                os.path.join(os.path.dirname(__file__), "icon.ico")
             ]
-            
-            for icon_path in icon_paths:
-                if os.path.exists(icon_path):
-                    self.root.iconbitmap(icon_path)
-                    self._log(f"✓ 已加载图标: {icon_path}", "success")
+            for path in alt_paths:
+                if os.path.exists(path):
+                    self.root.iconbitmap(path)
+                    self._log(f"✓ 已加载图标: {path}", "success")
                     return True
+
         except Exception as e:
-            pass
+            self._log(f"设置图标失败: {str(e)}", "warning")
+        return False
     
     def _load_custom_url(self):
         """加载保存的自定义网址"""
@@ -713,24 +665,56 @@ class PyInstxtractorCN_GUI:
             self._log(f"拖拽的文件无效或不是exe文件：{files}", "warning")
             self.left_frame.config(bg="#ffdddd")
             self.root.after(1000, lambda: self.left_frame.config(bg="#e0e0e0"))
-    
+
     def _check_pip_package(self, module_name):
-        """检查Python包是否已安装"""
-        try:
-            spec = importlib.util.find_spec(module_name)
-            if spec is not None:
-                return True
-            
-            result = subprocess.run(
-                [sys.executable, '-m', 'pip', 'show', module_name],
-                capture_output=True,
-                text=True,
-                timeout=5
-            )
-            return result.returncode == 0
-        except Exception:
+        """检查Python包是否已安装（使用系统Python）"""
+        if not hasattr(self, '_package_cache'):
+            self._package_cache = {}
+
+        if module_name in self._package_cache:
+            return self._package_cache[module_name]
+
+        # 如果没有可用的Python解释器
+        if not self.python_exe:
+            self._package_cache[module_name] = False
             return False
-    
+
+        try:
+            # 优先使用 importlib 检测（仅源码模式有效）
+            if not self.is_frozen:
+                spec = importlib.util.find_spec(module_name)
+                if spec is not None:
+                    self._package_cache[module_name] = True
+                    return True
+
+            # 使用系统Python检测
+            result = subprocess.run(
+                [self.python_exe, '-c', f'import {module_name}; print("ok")'],
+                capture_output=True,
+                timeout=3
+            )
+            is_installed = result.returncode == 0
+            self._package_cache[module_name] = is_installed
+            return is_installed
+        except Exception:
+            self._package_cache[module_name] = False
+            return False
+
+    def _check_single_instance(self):
+        """检查是否已有实例运行（防止exe多开）"""
+        import socket
+
+        # 使用端口监听方式（比文件锁更可靠）
+        self.port = 28374  # 随机端口
+        self.sock = None
+
+        try:
+            self.sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            self.sock.bind(('127.0.0.1', self.port))
+        except socket.error:
+            # 端口已被占用，说明已有实例运行
+            return False
+        return True
     def _find_available_tools(self):
         """自动查找可用的反编译工具"""
         available_tools = {}
@@ -900,7 +884,7 @@ class PyInstxtractorCN_GUI:
 
         self.btn_container = tk.Frame(self.left_frame, bg="#e0e0e0", padx=20, pady=20)
         self.btn_container.pack(anchor=tk.CENTER)
-        
+        '''
         # 操作提示
         tip_label = tk.Label(self.btn_container, text="操作步骤:", bg="#e0e0e0", anchor="w", 
                             font=("Arial", 9, "bold"))
@@ -915,17 +899,17 @@ class PyInstxtractorCN_GUI:
             step_label = tk.Label(self.btn_container, text=step, bg="#e0e0e0", anchor="w", 
                                  font=("Arial", 8))
             step_label.pack(fill="x", padx=5)
-        
+        '''
         # 按钮区域
-        select_file_btn = tk.Button(self.btn_container, text="📁 选择文件", command=self._select_file,
+        select_file_btn = tk.Button(self.btn_container, text="📁 选择/拖拽exe", command=self._select_file,
                                    width=15, height=2, bg="#3498db", fg="white", 
                                    font=("Arial", 10))
-        select_file_btn.pack(pady=8)
+        select_file_btn.pack(pady=5)
         
         select_dir_btn = tk.Button(self.btn_container, text="📂 选择输出目录", command=self._select_output_dir,
                                   width=15, height=2, bg="#2ecc71", fg="white", 
                                   font=("Arial", 10))
-        select_dir_btn.pack(pady=8)
+        select_dir_btn.pack(pady=5)
         
         # 清理选项
         self.clean_var = tk.BooleanVar(value=False)
@@ -934,15 +918,15 @@ class PyInstxtractorCN_GUI:
                                     bg="#e0e0e0", font=("Arial", 9),
                                     command=self._update_clean_description)
         clean_check.pack(pady=5)
-        
+        '''
         self.clean_desc = tk.Label(self.btn_container, 
                                   text="(删除图片、日志等非代码文件)", 
                                   bg="#e0e0e0", anchor="w", 
                                   font=("Arial", 8), fg="#666")
         self.clean_desc.pack(fill="x", padx=5, pady=(0, 5))
-        
+        '''
         # 分隔线
-        tk.Frame(self.btn_container, height=2, bg="#cccccc").pack(fill="x", pady=10)
+        tk.Frame(self.btn_container, height=2, bg="#cccccc").pack(fill="x", pady=2)
 
         # 工具选择框架
         tool_frame = tk.Frame(self.btn_container, bg="#e0e0e0")
@@ -976,7 +960,7 @@ class PyInstxtractorCN_GUI:
         self.update_btn.pack(side=tk.LEFT, padx=5)
         self.settings_btn.pack(side=tk.LEFT, padx=5)
 
-        # 自动转换和自动轮询放在一行
+        # 自动转换和自动轮换放在一行
         options_frame = tk.Frame(self.btn_container, bg="#e0e0e0")
         options_frame.pack(fill="x", pady=5)
 
@@ -987,9 +971,9 @@ class PyInstxtractorCN_GUI:
                                        bg="#e0e0e0", font=("Arial", 9))
         convert_check.pack(side=tk.LEFT, padx=(0, 10))
 
-        # 自动轮询选项
+        # 自动轮换选项
         self.auto_retry_var = tk.BooleanVar(value=True)
-        auto_retry_check = tk.Checkbutton(options_frame, text="轮询反编译工具",
+        auto_retry_check = tk.Checkbutton(options_frame, text="轮换反编译工具",
                                           variable=self.auto_retry_var,
                                           bg="#e0e0e0", font=("Arial", 9))
         auto_retry_check.pack(side=tk.LEFT)
@@ -997,9 +981,9 @@ class PyInstxtractorCN_GUI:
         # 转换说明
         self.convert_desc = tk.Label(self.btn_container,
                                      text="(推荐PyLingual)",
-                                     bg="#e0e0e0", anchor="w",
+                                     bg="#e0e0e0",
                                      font=("Arial", 8), fg="#06d6a0")
-        self.convert_desc.pack(fill="x", padx=5, pady=(0, 10))
+        self.convert_desc.pack(anchor="center", pady=(0, 10))
 
         # 开始按钮
         self.start_btn = tk.Button(self.btn_container, text="▶ 开始解包",
@@ -1034,17 +1018,17 @@ class PyInstxtractorCN_GUI:
         export_preview_btn = tk.Button(preview_toolbar, text="💾 导出", command=self._export_preview_code,
                                        width=5, height=1, bg="#2ecc71", fg="white",
                                        font=("Arial", 8))
-        export_preview_btn.pack(side=tk.LEFT, padx=2)
+        export_preview_btn.pack(side=tk.LEFT, padx=5)
         
         copy_preview_btn = tk.Button(preview_toolbar, text="📋 复制", command=self._copy_preview_code,
                                      width=5, height=1, bg="#3498db", fg="white",
                                      font=("Arial", 8))
-        copy_preview_btn.pack(side=tk.LEFT, padx=2)
+        copy_preview_btn.pack(side=tk.LEFT, padx=5)
         
         refresh_preview_btn = tk.Button(preview_toolbar, text="🔄 刷新", command=self._refresh_preview,
                                         width=5, height=1, bg="#9b59b6", fg="white",
                                         font=("Arial", 8))
-        refresh_preview_btn.pack(side=tk.LEFT, padx=2)
+        refresh_preview_btn.pack(side=tk.LEFT, padx=5)
         
         self.preview_text = scrolledtext.ScrolledText(right_frame, height=12, wrap=tk.NONE,
                                                        font=("Consolas", 9), bg="#1e1e1e", 
@@ -1065,12 +1049,12 @@ class PyInstxtractorCN_GUI:
         clear_btn = tk.Button(log_toolbar, text="🗑 清空", command=self._clear_log,
                              width=5, height=1, bg="#e74c3c", fg="white",
                              font=("Arial", 8))
-        clear_btn.pack(side=tk.LEFT, padx=2)
+        clear_btn.pack(side=tk.LEFT, padx=5)
         
         export_btn = tk.Button(log_toolbar, text="💾 导出", command=self._export_log,
                               width=5, height=1, bg="#3498db", fg="white",
                               font=("Arial", 8))
-        export_btn.pack(side=tk.LEFT, padx=2)
+        export_btn.pack(side=tk.LEFT, padx=5)
         
         self.log_area = scrolledtext.ScrolledText(right_frame, height=8, wrap=tk.WORD,
                                                  font=("Consolas", 9), bg="#1e1e1e", 
@@ -1166,6 +1150,49 @@ class PyInstxtractorCN_GUI:
         
         self.preview_text.insert(tk.END, info)
         self.preview_text.config(state=tk.DISABLED)
+
+    def _find_system_python(self):
+        """查找系统中的Python可执行文件（避免调用自身）"""
+        import shutil
+
+        # 优先查找用户目录下的Python
+        user = os.getenv("USERNAME")
+        paths = [
+            # 虚拟环境
+            os.path.join(os.path.dirname(sys.executable), "python.exe"),
+            os.path.join(os.path.dirname(sys.executable), "..", "Scripts", "python.exe"),
+            # 系统Python路径
+            shutil.which("python"),
+            shutil.which("python3"),
+            r"C:\Python312\python.exe",
+            r"C:\Python311\python.exe",
+            r"C:\Python310\python.exe",
+            rf"C:\Users\{user}\AppData\Local\Programs\Python\Python312\python.exe",
+            rf"C:\Users\{user}\AppData\Local\Programs\Python\Python311\python.exe",
+            r"C:\Program Files\Python312\python.exe",
+            r"C:\Program Files\Python311\python.exe",
+        ]
+
+        for path in paths:
+            if path and os.path.exists(path):
+                # 确保不是当前exe自身
+                if self.is_frozen and os.path.samefile(path, sys.executable):
+                    continue
+                return path
+
+        # 最后尝试通过where命令查找
+        try:
+            result = subprocess.run(['where', 'python'], capture_output=True, text=True, timeout=3)
+            if result.returncode == 0:
+                for line in result.stdout.strip().split('\n'):
+                    if line and os.path.exists(line):
+                        if self.is_frozen and os.path.samefile(line, sys.executable):
+                            continue
+                        return line
+        except:
+            pass
+
+        return None
 
     def _get_output_dir(self):
         """获取解包目录（带工具名称后缀）"""
@@ -1440,10 +1467,10 @@ class PyInstxtractorCN_GUI:
             py_file = pyc_file[:-4] + '.py'
             self._log(f"  使用PyChD反编译（混合规则+LLM）...", "info")
 
-            if isinstance(tool_path, str) and tool_path.startswith("python -m"):
-                cmd = [sys.executable, '-m', 'pychd', pyc_file, '-o', py_file]
-            else:
-                cmd = [tool_path, pyc_file, '-o', py_file]
+            # 使用系统Python
+            python_exe = self.python_exe if self.python_exe else sys.executable
+        
+            cmd = [python_exe, '-m', 'pychd', pyc_file, '-o', py_file]
 
             result = subprocess.run(cmd, capture_output=True, timeout=180,
                                     text=True, encoding='utf-8', errors='ignore')
@@ -1652,7 +1679,7 @@ class PyInstxtractorCN_GUI:
             return False, None
 
     def _convert_main_pyc_files(self, directory):
-        """转换主要的pyc文件，支持自动轮询"""
+        """转换主要的pyc文件，支持自动轮换"""
         if not self.available_tools:
             self._log("未找到任何反编译工具，跳过pyc转换", "warning")
             return 0, 0
@@ -1680,7 +1707,7 @@ class PyInstxtractorCN_GUI:
         fail_count = 0
         success_tool = None  # 记录成功使用的工具
 
-        # 定义工具轮询顺序（按效果排序）
+        # 定义工具轮换顺序（按效果排序）
         tool_priority = [
             "pylingual",
             "pychd",
@@ -1708,9 +1735,9 @@ class PyInstxtractorCN_GUI:
             if success:
                 used_tool = self.decompile_tool
 
-            # 如果失败且启用了自动轮询
+            # 如果失败且启用了自动轮换
             if not success and self.auto_retry_var.get():
-                self._log(f"  ⚠ {self.decompile_tool} 转换失败，开始自动轮询其他工具...", "warning")
+                self._log(f"  ⚠ {self.decompile_tool} 转换失败，开始自动轮换其他工具...", "warning")
 
                 for tool_key in tool_priority:
                     if tool_key == self.decompile_tool:
@@ -1971,19 +1998,6 @@ if __name__ == "__main__":
     except ImportError:
         #print("提示：安装 tkinterdnd2 可支持文件拖拽功能")
         #print("安装命令：pip install tkinterdnd2")
-        root = tk.Tk()
-
-# AUTO_INJECTED_ICON
-if getattr(sys, 'frozen', False):
-    _base = sys._MEIPASS
-else:
-    _base = os.path.dirname(__file__)
-_ip = os.path.join(_base, "icon.ico")
-if os.path.exists(_ip):
-    try: self.root.iconbitmap(_ip)
-    except: pass
-# END AUTO_INJECTED_ICON
-
-    
+        root = tk.Tk()   
     app = PyInstxtractorCN_GUI(root)
     root.mainloop()
